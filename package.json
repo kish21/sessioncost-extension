@@ -1,0 +1,193 @@
+{
+  "name": "sessioncost",
+  "displayName": "SessionCost",
+  "description": "Your coding agent's tokens, cost and safety guard in the status bar: report, token tips, fix it with undo, guard on/off. Runs the SessionCost tool on this computer; sends nothing anywhere.",
+  "version": "1.2.0",
+  "publisher": "kish21",
+  "license": "MIT",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kish21/sessioncost-extension"
+  },
+  "bugs": {
+    "url": "https://github.com/kish21/sessioncost-extension/issues"
+  },
+  "homepage": "https://github.com/kish21/sessioncost-extension#readme",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.100.0",
+    "node": ">=22"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In Restricted Mode SessionCost shows the numbers and the guard, but does not change files in this folder (Fix it and Undo are off)."
+    },
+    "virtualWorkspaces": false
+  },
+  "categories": [
+    "Other",
+    "Visualization"
+  ],
+  "keywords": [
+    "claude code",
+    "codex",
+    "cursor",
+    "antigravity",
+    "copilot",
+    "tokens",
+    "cost",
+    "guard",
+    "agent"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "sessioncost.menu",
+        "title": "Menu",
+        "category": "SessionCost"
+      },
+      {
+        "command": "sessioncost.report",
+        "title": "Open report of this folder's newest chat",
+        "category": "SessionCost"
+      },
+      {
+        "command": "sessioncost.status",
+        "title": "Show what SessionCost is doing",
+        "category": "SessionCost"
+      },
+      {
+        "command": "sessioncost.fix",
+        "title": "Fix token waste (preview, then apply)",
+        "category": "SessionCost"
+      },
+      {
+        "command": "sessioncost.undo",
+        "title": "Undo the last fix",
+        "category": "SessionCost"
+      },
+      {
+        "command": "sessioncost.tipsOn",
+        "title": "Turn token tips on",
+        "category": "SessionCost"
+      },
+      {
+        "command": "sessioncost.tipsOff",
+        "title": "Turn token tips off",
+        "category": "SessionCost"
+      },
+      {
+        "command": "sessioncost.guardOn",
+        "title": "Turn the guard on",
+        "category": "SessionCost"
+      },
+      {
+        "command": "sessioncost.guardStrict",
+        "title": "Turn the guard on (strict)",
+        "category": "SessionCost"
+      },
+      {
+        "command": "sessioncost.guardOff",
+        "title": "Turn the guard off",
+        "category": "SessionCost"
+      },
+      {
+        "command": "sessioncost.guardReport",
+        "title": "Open the guard report",
+        "category": "SessionCost"
+      },
+      {
+        "command": "sessioncost.handover",
+        "title": "Open the handover",
+        "category": "SessionCost"
+      },
+      {
+        "command": "sessioncost.prices",
+        "title": "Show prices used",
+        "category": "SessionCost"
+      },
+      {
+        "command": "sessioncost.list",
+        "title": "List this folder's chats",
+        "category": "SessionCost"
+      },
+      {
+        "command": "sessioncost.serve",
+        "title": "Open the live report page",
+        "category": "SessionCost"
+      },
+      {
+        "command": "sessioncost.setup",
+        "title": "Set up your agents",
+        "category": "SessionCost"
+      },
+      {
+        "command": "sessioncost.update",
+        "title": "Update every SessionCost on this computer",
+        "category": "SessionCost"
+      },
+      {
+        "command": "sessioncost.clean",
+        "title": "Delete old reports",
+        "category": "SessionCost"
+      },
+      {
+        "command": "sessioncost.install",
+        "title": "Install SessionCost",
+        "category": "SessionCost"
+      },
+      {
+        "command": "sessioncost.refresh",
+        "title": "Refresh the status bar",
+        "category": "SessionCost"
+      }
+    ],
+    "configuration": {
+      "title": "SessionCost",
+      "properties": {
+        "sessioncost.refreshSeconds": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 3,
+          "description": "How often (seconds) the status bar checks whether the chat or the guard changed. It asks SessionCost again only when something changed, and only while this window has focus."
+        },
+        "sessioncost.notifyGuard": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a pop-up when the guard stops a step or asks you about one."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "test": "vitest run",
+    "test:integration": "node scripts/build.mjs --tests && vscode-test",
+    "check": "npm run typecheck && npm run lint && npm run test && npm run build",
+    "package": "npm run build && vsce package --no-dependencies",
+    "publish:marketplace": "node scripts/env-guard.mjs VSCE_PAT && npm run build && vsce publish --no-dependencies",
+    "publish:openvsx": "node scripts/env-guard.mjs OVSX_PAT && npm run build && npx --yes ovsx@1.2.0 publish --no-dependencies"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.14",
+    "@types/mocha": "10.0.10",
+    "@types/node": "22.20.4",
+    "@types/vscode": "1.100.0",
+    "@vscode/test-cli": "0.0.15",
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "4.0.0",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2",
+    "vitest": "5.0.1"
+  }
+}

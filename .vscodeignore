@@ -1,0 +1,22 @@
+# Everything not listed here ships. The .vsix holds only: dist/extension.js(.map), dist/npm (the npm wrapper that
+# installs SessionCost), media/icon.png, package.json, README, LICENSE, CHANGELOG.
+src/**
+tests/**
+scripts/**
+dist/tests/**
+node_modules/**
+# the public extension repo keeps the npm wrapper in npm/; the build copies it into dist/npm, which ships
+npm/**
+.vscode/**
+.vscode-test/**
+.vscode-test.mjs
+*.vsix
+.env*
+.gitignore
+biome.json
+tsconfig*.json
+vitest.config.mts
+package-lock.json
+*.md
+!README.md
+!CHANGELOG.md

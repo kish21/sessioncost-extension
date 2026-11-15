@@ -1,0 +1,35 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": { "includes": ["**", "!**/*.md", "!dist", "!.vscode-test"] },
+  "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 110 },
+  "linter": {
+    "rules": {
+      "preset": "recommended",
+      "suspicious": { "noConsole": "error" }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["scripts/**", "tests/**"],
+      "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
+    },
+    {
+      "includes": ["src/core/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "vscode": "src/core never imports vscode: it is tested in plain Node (tests/unit)."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
