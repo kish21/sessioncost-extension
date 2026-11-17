@@ -22,6 +22,12 @@ export function launch(w: Where, args: string[], env: NodeJS.ProcessEnv): Launch
   return { cmd: w.node, args: [w.wrapper, ...args], env: { ...base, ELECTRON_RUN_AS_NODE: "1" } };
 }
 
+/** `sessioncost fix` for the preview and for the apply. Both name the same chat (the one the status bar shows):
+ * "the newest chat" twice could be two chats, and the second one's changes would be applied without being shown. */
+export function fixArgs(project: string, chat: string | undefined, step: "preview" | "apply"): string[] {
+  return ["fix", ...(chat ? [chat] : []), "--project", project, step === "preview" ? "--preview" : "--yes"];
+}
+
 export interface Result {
   code: number; // -1: could not start, or stopped after the time limit
   out: string;

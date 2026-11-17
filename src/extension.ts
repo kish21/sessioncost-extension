@@ -1,6 +1,6 @@
 // SessionCost in the editor: a status bar item and a menu. Every number and every change comes from the installed
 // SessionCost (run as a separate process); this file only shows its answers and asks before anything changes.
-import { existsSync, statSync } from "node:fs";
+import { existsSync, type FSWatcher, readFileSync, statSync, watch } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import * as vscode from "vscode";
@@ -9,13 +9,15 @@ import {
   lastPath,
   look,
   newStop,
+  notReady,
   parseAnswer,
+  remember,
   reportPath,
-  stopKey,
   stopMessage,
 } from "./core/answer";
 import { menu } from "./core/menu";
-import { launch, type Result, run } from "./core/run";
+import { fixArgs, launch, type Result, run } from "./core/run";
+import { newEnough } from "./core/stamp";
 
 const QUICK_MS = 120_000; // a status answer or a switch
 const LONG_MS = 900_000; // installing, updating, setup
@@ -29,6 +31,10 @@ let busy = false;
 let lastAsk = 0;
 let lastSig = "";
 let unseen = false;
+let again = false; // a new chat showed up while SessionCost was busy answering: ask once more after
+const watchers: FSWatcher[] = [];
+let watched = "";
+const soonTimers: NodeJS.Timeout[] = [];
 let installing: Promise<boolean> | null = null;
 
 /** npm/bin/sessioncost.js, shipped in dist/npm: the part of it used here (it also installs SessionCost). */
@@ -51,7 +57,13 @@ function wrapperFile(): string {
 }
 
 function isInstalled(): boolean {
-  return wrapper.installed(env());
+  if (wrapper.installed(env())) return true;
+  const w = wrapper.where(env()); // another editor's newer copy is fine: never put an older one back
+  try {
+    return existsSync(w.py) && newEnough(readFileSync(w.stamp, "utf8"), wrapper.VERSION);
+  } catch {
+    return false;
+  }
 }
 
 function folder(): string | undefined {
@@ -116,6 +128,7 @@ async function ensureInstalled(ask: boolean): Promise<boolean> {
     }
     return true;
   })();
+  waitBar(); // says "Updating…" / "Installing…" at once, not "Install"
   try {
     return await installing;
   } finally {
@@ -123,8 +136,40 @@ async function ensureInstalled(ask: boolean): Promise<boolean> {
   }
 }
 
+/** A new file or folder where chats appear: ask now, and again shortly (its first lines may not be written yet). */
+function soon(): void {
+  for (const t of soonTimers.splice(0)) clearTimeout(t);
+  soonTimers.push(
+    setTimeout(() => void refresh(true), 500),
+    setTimeout(() => void refresh(true), 5_000),
+  );
+}
+
+/** Watches the answer's chat folders for new entries, so a new chat shows at once instead of on the timer. */
+function follow(a: Answer | null): void {
+  const dirs = a?.watch_dirs ?? [];
+  if (dirs.join("|") === watched) return;
+  unfollow();
+  watched = dirs.join("|");
+  for (const d of dirs) {
+    try {
+      const w = watch(d, (event) => event === "rename" && soon()); // "rename": an entry was added or removed
+      w.on("error", () => w.close()); // a folder that goes away: the timer still checks
+      watchers.push(w);
+    } catch {
+      // cannot watch here (gone, or not allowed): the timer still checks
+    }
+  }
+}
+
+function unfollow(): void {
+  for (const w of watchers.splice(0)) w.close();
+  for (const t of soonTimers.splice(0)) clearTimeout(t);
+  watched = "";
+}
+
 function signature(a: Answer | null): string {
-  return (a?.watch ?? [])
+  return [...(a?.watch ?? []), ...(a?.watch_dirs ?? [])]
     .map((f) => {
       try {
         const s = statSync(f);
@@ -146,16 +191,23 @@ function paint(): void {
   bar.show();
 }
 
+/** The status bar while SessionCost cannot answer yet: installing, updating, or not there. */
+function waitBar(): void {
+  const l = notReady(wrapper.VERSION, installing !== null, existsSync(wrapper.where(env()).stamp));
+  bar.text = l.text;
+  bar.tooltip = l.tooltip;
+  bar.command = installing ? undefined : "sessioncost.install";
+  bar.backgroundColor = undefined;
+  bar.show();
+}
+
 /** Asks SessionCost for the status bar's answer. force: even when nothing changed. */
 async function refresh(force = false): Promise<void> {
   const here = folder();
+  if (busy && force) again = true;
   if (busy || !here) return;
   if (!isInstalled()) {
-    bar.text = "$(cloud-download) Install SessionCost";
-    bar.tooltip = `SessionCost ${wrapper.VERSION} is not installed yet. Click to install it.`;
-    bar.command = "sessioncost.install";
-    bar.backgroundColor = undefined;
-    bar.show();
+    waitBar();
     return;
   }
   const sig = signature(answer);
@@ -174,13 +226,18 @@ async function refresh(force = false): Promise<void> {
       bar.show();
       return;
     }
-    const seen = ctx.globalState.get<string>("seenStop");
+    const seen = ctx.globalState.get<string[]>("seenStops") ?? [];
     const stop = newStop(seen, next);
     const first = answer === null;
     answer = next;
     lastSig = signature(answer);
+    follow(answer);
     if (stop) {
-      await ctx.globalState.update("seenStop", stopKey(next));
+      // read again: another window may have added its own stop meanwhile
+      await ctx.globalState.update(
+        "seenStops",
+        remember(ctx.globalState.get<string[]>("seenStops") ?? [], next),
+      );
       if (!first) {
         unseen = true;
         if (vscode.workspace.getConfiguration("sessioncost").get<boolean>("notifyGuard", true)) {
@@ -193,6 +250,10 @@ async function refresh(force = false): Promise<void> {
     paint();
   } finally {
     busy = false;
+    if (again) {
+      again = false;
+      void refresh(true);
+    }
   }
 }
 
@@ -239,11 +300,19 @@ const commands: Record<string, () => Promise<unknown> | unknown> = {
   "sessioncost.menu": async () => {
     unseen = false;
     paint();
-    const pick = await vscode.window.showQuickPick(
-      menu(answer, vscode.workspace.isTrusted).map((i) => ({ ...i, description: i.detail ?? "" })),
-      { title: "SessionCost", placeHolder: "What would you like to do?" },
-    );
-    if (pick) await vscode.commands.executeCommand(pick.command);
+    // one titled line above each group; the hint once, beside the name (as `detail` it showed a second time below)
+    const picks: (vscode.QuickPickItem & { command?: string })[] = [];
+    let group = "";
+    for (const i of menu(answer, vscode.workspace.isTrusted)) {
+      if (i.group !== group) picks.push({ label: i.group, kind: vscode.QuickPickItemKind.Separator });
+      group = i.group;
+      picks.push({ label: i.label, description: i.detail ?? "", command: i.command });
+    }
+    const pick = await vscode.window.showQuickPick(picks, {
+      title: "SessionCost",
+      placeHolder: "What would you like to do?",
+    });
+    if (pick?.command) await vscode.commands.executeCommand(pick.command);
   },
   "sessioncost.install": () => ensureInstalled(false).then(() => refresh(true)),
   "sessioncost.refresh": () => refresh(true),
@@ -266,14 +335,16 @@ const commands: Record<string, () => Promise<unknown> | unknown> = {
       );
       return;
     }
-    const preview = await showRun(["fix", "--project", f, "--preview"]);
+    const same = (p: string) => p.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+    const chat = answer && same(answer.project) === same(f) ? answer.chat?.id || undefined : undefined; // the bar's chat
+    const preview = await showRun(fixArgs(f, chat, "preview"));
     if (preview.code !== 0) return;
     const pick = await vscode.window.showWarningMessage(
       "Apply the changes shown in the SessionCost output? A backup is kept; Undo puts it back.",
       { modal: true },
       "Apply",
     );
-    if (pick === "Apply") await showRun(["fix", "--project", f, "--yes"]);
+    if (pick === "Apply") await showRun(fixArgs(f, chat, "apply"));
     await refresh(true);
   },
   "sessioncost.undo": async () => {
@@ -355,12 +426,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<{ answ
   let timer = setInterval(() => vscode.window.state.focused && void refresh(), seconds() * 1000);
   context.subscriptions.push(
     { dispose: () => clearInterval(timer) },
+    { dispose: unfollow },
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (!e.affectsConfiguration("sessioncost.refreshSeconds")) return;
       clearInterval(timer);
       timer = setInterval(() => vscode.window.state.focused && void refresh(), seconds() * 1000);
     }),
     vscode.window.onDidChangeWindowState((s) => s.focused && void refresh()),
+    // several folders in one window: the bar shows the active file's folder, so a file in another folder asks at once
+    vscode.window.onDidChangeActiveTextEditor(() => {
+      const f = folder();
+      if (
+        f &&
+        answer &&
+        f.replace(/\\/g, "/").toLowerCase() !== answer.project.replace(/\\/g, "/").toLowerCase()
+      )
+        void refresh(true);
+    }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => refresh(true)),
   );
   void (async () => {

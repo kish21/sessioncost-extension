@@ -2,10 +2,10 @@
 
 See what your coding agent's chat costs in tokens, and what the safety guard stopped, right in the status bar.
 
-`🛡 Guard on · 84k tokens · $0.62`
+`🛡 Guard on · fix the login · 84k tokens · $0.62`
 
-- **Status bar:** the guard, and the tokens and cost of this folder's newest chat (Claude Code, Codex, Copilot,
-  Antigravity or Cursor). It turns amber when the guard stopped a step.
+- **Status bar:** the guard, and the name, tokens and cost of this folder's newest chat (Claude Code, Codex,
+  Copilot, Antigravity or Cursor). It turns amber when the guard stopped a step.
 - **Pop-up** when the guard stops or asks about a step, with **Show** for the guard report.
 - **Click it** for the menu: open the report, token tips on/off, fix token waste (you see each change first, a backup
   is kept), undo, guard on/off, the guard report, the handover, prices, setup and update.

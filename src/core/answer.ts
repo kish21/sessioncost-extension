@@ -32,6 +32,8 @@ export interface Answer {
   chat: Chat | null;
   handover: string | null;
   watch: string[];
+  /** Folders where a new chat of this folder appears; a new entry there means "ask again". Older SessionCost: none. */
+  watch_dirs?: string[];
   error?: string;
 }
 
@@ -65,6 +67,15 @@ export function money(x: number): string {
   return x >= 0.995 || x === 0 ? `$${x.toFixed(2)}` : `$${x.toFixed(3)}`;
 }
 
+/** The chat's name for the status bar: at most 24 letters, cut at a word when it can be. */
+export function shortTitle(title: string, max = 24): string {
+  const t = title.replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max - 1);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > max / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}
+
 export interface Look {
   text: string;
   tooltip: string;
@@ -75,7 +86,8 @@ export interface Look {
 export function look(a: Answer, unseen: boolean): Look {
   const guard = a.guard.on ? `Guard on${a.guard.strict ? " (strict)" : ""}` : "Guard off";
   const c = a.chat;
-  const text = `$(shield) ${guard} · ${c ? `${tokens(c.sent)} tokens · ${money(c.usd)}` : "no chat yet"}`;
+  const name = c ? shortTitle(c.title) : "";
+  const text = `$(shield) ${guard} · ${c ? `${name ? `${name} · ` : ""}${tokens(c.sent)} tokens · ${money(c.usd)}` : "no chat yet"}`;
   const lines = [`SessionCost ${a.version}`, ""];
   if (c) {
     lines.push(`Newest chat here (${c.agent_label}): ${c.title}`);
@@ -99,11 +111,46 @@ export function look(a: Answer, unseen: boolean): Look {
   return { text, tooltip: lines.join("\n"), warn: unseen };
 }
 
-/** The stop to tell the user about: the chat's newest one, when it is not the one seen before. */
-export function newStop(seen: string | undefined, a: Answer): Stop | null {
+/** The status bar before SessionCost can answer. running: an install or update is under way now. older: an older
+ * copy from this extension is there (so it is an update, not a first install). */
+export function notReady(version: string, running: boolean, older: boolean): Look {
+  if (running)
+    return older
+      ? {
+          text: "$(sync~spin) Updating SessionCost…",
+          tooltip: `SessionCost is updating to ${version}. Your chat's numbers come back when it is done.`,
+          warn: false,
+        }
+      : {
+          text: "$(sync~spin) Installing SessionCost…",
+          tooltip: `SessionCost ${version} is being installed. The numbers show when it is done.`,
+          warn: false,
+        };
+  return older
+    ? {
+        text: "$(cloud-download) Update SessionCost",
+        tooltip: `An older SessionCost is here. Click to update it to ${version}.`,
+        warn: false,
+      }
+    : {
+        text: "$(cloud-download) Install SessionCost",
+        tooltip: `SessionCost ${version} is not installed yet. Click to install it.`,
+        warn: false,
+      };
+}
+
+/** The stop to tell the user about: the chat's newest one, when it was not shown before. seen: the stops already
+ * shown, in any window (they share it), so one window's stop never makes another's show again. */
+export function newStop(seen: readonly string[], a: Answer): Stop | null {
   const s = a.chat?.last_stop;
   if (!s) return null;
-  return stopKey(a) === seen ? null : s;
+  return seen.includes(stopKey(a) ?? "") ? null : s;
+}
+
+/** seen, with this answer's stop added; the newest 100 are kept. */
+export function remember(seen: readonly string[], a: Answer): string[] {
+  const k = stopKey(a);
+  return k && !seen.includes(k) ? [...seen, k].slice(-100) : [...seen];
 }
 
 export function stopKey(a: Answer | null): string | undefined {
@@ -111,11 +158,14 @@ export function stopKey(a: Answer | null): string | undefined {
   return s && a?.chat ? `${a.chat.id} ${s.ts} ${s.decision}` : undefined;
 }
 
+/** Told after the fact: the step already ran or did not; nothing is waiting for an answer here. */
 export function stopMessage(s: Stop): string {
   const what = s.what.length > 80 ? `${s.what.slice(0, 79)}…` : s.what;
+  const at = /T(\d\d:\d\d)/.exec(s.ts)?.[1];
+  const step = `${s.why}${what ? ` (${what})` : ""}`;
   return s.decision === "blocked"
-    ? `SessionCost guard stopped a step: ${s.why}${what ? ` (${what})` : ""}`
-    : `SessionCost guard asked you about a step: ${s.why}${what ? ` (${what})` : ""}`;
+    ? `${at ? `At ${at} the` : "The"} SessionCost guard stopped a step; it did not run: ${step}`
+    : `${at ? `At ${at} the` : "The"} SessionCost guard asked before a step; it was answered in the chat: ${step}`;
 }
 
 /** The report's path from `sessioncost last --brief` (its "Report: <path>" line), or null. */
