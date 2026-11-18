@@ -2,7 +2,7 @@
   "name": "sessioncost",
   "displayName": "SessionCost",
   "description": "Your coding agent's tokens, cost and safety guard in the status bar: report, token tips, fix it with undo, guard on/off. Runs the SessionCost tool on this computer; sends nothing anywhere.",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "publisher": "kish21",
   "license": "MIT",
   "private": true,
