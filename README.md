@@ -22,7 +22,9 @@ Code plugin. See the [SessionCost README](https://github.com/kish21/sessioncost#
 ## Privacy
 
 Everything runs on this computer. The extension runs the SessionCost tool, which reads your agents' chat logs on this
-computer and sends nothing anywhere. The only download is SessionCost itself, once per version.
+computer and sends nothing anywhere. The only download is SessionCost itself, once per version. One exception, in
+the guard: when the agent installs a package, its name goes to its registry to check how new that version is
+(`sessioncost guard fresh-releases off` stops it).
 
 ## Settings
 
