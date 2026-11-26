@@ -158,14 +158,16 @@ export function stopKey(a: Answer | null): string | undefined {
   return s && a?.chat ? `${a.chat.id} ${s.ts} ${s.decision}` : undefined;
 }
 
-/** Told after the fact: the step already ran or did not; nothing is waiting for an answer here. */
+/** Told after the fact: the step already ran or did not; nothing is waiting for an answer here. An ask never claims
+ * it was answered: another check (the project's own hook) can stop the step before the question reaches the user. */
 export function stopMessage(s: Stop): string {
   const what = s.what.length > 80 ? `${s.what.slice(0, 79)}…` : s.what;
   const at = /T(\d\d:\d\d)/.exec(s.ts)?.[1];
   const step = `${s.why}${what ? ` (${what})` : ""}`;
   return s.decision === "blocked"
     ? `${at ? `At ${at} the` : "The"} SessionCost guard stopped a step; it did not run: ${step}`
-    : `${at ? `At ${at} the` : "The"} SessionCost guard asked before a step; it was answered in the chat: ${step}`;
+    : `${at ? `At ${at} the` : "The"} SessionCost guard wanted your yes before a step: ${step}. ` +
+        "If you saw no question, another check stopped the step first and it did not run.";
 }
 
 /** The report's path from `sessioncost last --brief` (its "Report: <path>" line), or null. */
