@@ -28,6 +28,24 @@ export function fixArgs(project: string, chat: string | undefined, step: "previe
   return ["fix", ...(chat ? [chat] : []), "--project", project, step === "preview" ? "--preview" : "--yes"];
 }
 
+/** What to do right after installing or upgrading the editor's SessionCost copy:
+ * - upgrade (`older`): refresh already-configured agents in the background so skills and hooks match the new version
+ * - fresh install: ask the user whether to run `setup` (unless auto-install is set for tests). */
+export function postInstallAction(older: boolean, autoInstall: boolean): "refresh" | "ask-setup" | "none" {
+  if (older) return "refresh";
+  return autoInstall ? "none" : "ask-setup";
+}
+
+/** Refreshes existing agent skills and guard hooks without touching unconfigured agents. */
+export function refreshArgs(): string[] {
+  return ["setup", "--refresh"];
+}
+
+/** Runs `sessioncost uninstall --yes` after the editor's own modal confirmation. */
+export function uninstallArgs(): string[] {
+  return ["uninstall", "--yes"];
+}
+
 export interface Result {
   code: number; // -1: could not start, or stopped after the time limit
   out: string;

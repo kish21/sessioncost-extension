@@ -1,6 +1,8 @@
 // `sessioncost editor --json`: its answer, and how the status bar says it. No vscode import (tested in plain Node).
 
 export const SCHEMA = 1;
+/** Context fullness (%) at which the status bar turns amber and suggests a handover. */
+export const CONTEXT_WARN_PCT = 75;
 
 export interface Stop {
   ts: string;
@@ -18,9 +20,20 @@ export interface Chat {
   sent: number;
   usd: number;
   tokens_exact: boolean;
+  /** Latest main-call context size in tokens, handover limit, and fullness %. Older SessionCost: omitted. */
+  context?: number;
+  context_limit?: number;
+  context_pct?: number;
   guard: { checked: number; blocked: number; asked: number; intact: boolean } | null;
   last_stop: Stop | null;
   last_tip: string;
+}
+
+export interface Setup {
+  ok: boolean;
+  detected: string[];
+  missing: string[];
+  outdated: string[];
 }
 
 export interface Answer {
@@ -29,6 +42,8 @@ export interface Answer {
   project: string;
   guard: { on: boolean; strict: boolean; dir: string };
   tips: { on: boolean };
+  /** Agent setup status (missing skills/hooks or outdated skill versions). Older SessionCost: omitted. */
+  setup?: Setup;
   chat: Chat | null;
   handover: string | null;
   watch: string[];
@@ -82,18 +97,51 @@ export interface Look {
   warn: boolean;
 }
 
-/** What the status bar shows. unseen: a stop the user has not looked at yet (the item turns amber). */
-export function look(a: Answer, unseen: boolean): Look {
+/** Copilot and Cursor drop prompt-hook context, so mid-chat tips surface here in the status bar instead of in chat. */
+export function isStatusBarTipAgent(agent: string): boolean {
+  return agent === "cursor" || agent === "copilot" || agent === "copilot-vscode";
+}
+
+/** What the status bar shows. unseen: a stop the user has not looked at yet (the item turns amber).
+ * unseenTip: a new token tip the user has not seen yet (adds a 💡 indicator without turning the bar amber). */
+export function look(a: Answer, unseen: boolean, unseenTip = false): Look {
   const guard = a.guard.on ? `Guard on${a.guard.strict ? " (strict)" : ""}` : "Guard off";
   const c = a.chat;
   const name = c ? shortTitle(c.title) : "";
-  const text = `$(shield) ${guard} · ${c ? `${name ? `${name} · ` : ""}${tokens(c.sent)} tokens · ${money(c.usd)}` : "no chat yet"}`;
+  const tip = c?.last_tip?.trim() ?? "";
+  const hasUnseenTip = Boolean(unseenTip && tip);
+  const ctxPct = c?.context_pct && c.context_pct > 0 ? Math.min(100, Math.round(c.context_pct)) : 0;
+  const contextWarn = ctxPct >= CONTEXT_WARN_PCT;
+  const missing = a.setup?.missing ?? [];
+  const outdated = a.setup?.outdated ?? [];
+  const needsSetup = Boolean(a.setup && !a.setup.ok);
+  const text = needsSetup
+    ? missing.length > 0
+      ? "$(warning) SessionCost: Setup incomplete"
+      : "$(warning) SessionCost: Update setup"
+    : `$(shield) ${guard} · ${c ? `${name ? `${name} · ` : ""}${tokens(c.sent)} tokens · ${money(c.usd)}${ctxPct > 0 ? ` · context ${ctxPct}%` : ""}` : "no chat yet"}${hasUnseenTip ? " · 💡" : ""}`;
   const lines = [`SessionCost ${a.version}`, ""];
+  if (needsSetup) {
+    if (missing.length > 0) lines.push(`Setup incomplete (missing skills or hooks): ${missing.join(", ")}`);
+    if (outdated.length > 0) lines.push(`Outdated skills (update needed): ${outdated.join(", ")}`);
+    lines.push("Run 'Set up your agents' from the menu to fix.", "");
+  }
   if (c) {
     lines.push(`Newest chat here (${c.agent_label}): ${c.title}`);
     lines.push(
       `${tokens(c.sent)} tokens sent${c.tokens_exact ? "" : " (estimated)"} · about ${money(c.usd)} at API prices, not your bill`,
     );
+    if (ctxPct > 0) {
+      const span =
+        c.context && c.context_limit
+          ? `${tokens(c.context)} / ${tokens(c.context_limit)} (${ctxPct}%)`
+          : `${ctxPct}%`;
+      lines.push(
+        contextWarn
+          ? `Context: ${span} — near handover limit; write a handover and start a fresh chat`
+          : `Context: ${span}`,
+      );
+    }
     if (c.guard)
       lines.push(
         `Guard in this chat: ${c.guard.checked} steps checked, ${c.guard.blocked} stopped, ${c.guard.asked} asked you` +
@@ -101,14 +149,30 @@ export function look(a: Answer, unseen: boolean): Look {
       );
     if (c.last_stop)
       lines.push(`Last ${c.last_stop.decision === "blocked" ? "stop" : "question"}: ${c.last_stop.why}`);
-    if (c.last_tip) lines.push(`Last token tip: ${c.last_tip}`);
+    if (tip) {
+      lines.push(`${hasUnseenTip ? "💡 New token tip" : "💡 Token tip"}: ${tip}`);
+      if (isStatusBarTipAgent(c.agent)) {
+        lines.push(
+          `Mid-chat tips for ${c.agent_label || "Copilot/Cursor"} appear here in the status bar. Open the menu and run Fix token waste to apply.`,
+        );
+      } else {
+        lines.push("Open the menu and run Fix token waste to apply.");
+      }
+    }
   } else {
     lines.push("No chat of Claude Code, Codex, Copilot, Antigravity or Cursor in this folder yet.");
   }
   lines.push(`Guard: ${a.guard.on ? "on" : "off"} · Token tips: ${a.tips.on ? "on" : "off"}`);
   if (a.error) lines.push(`Note: ${a.error}`);
-  lines.push("", "Click for the menu");
-  return { text, tooltip: lines.join("\n"), warn: unseen };
+  lines.push(
+    "",
+    needsSetup
+      ? "Click to set up your agents"
+      : hasUnseenTip
+        ? "Click to open the menu and run Fix token waste"
+        : "Click for the menu",
+  );
+  return { text, tooltip: lines.join("\n"), warn: unseen || needsSetup || contextWarn };
 }
 
 /** The status bar before SessionCost can answer. running: an install or update is under way now. older: an older
@@ -156,6 +220,24 @@ export function remember(seen: readonly string[], a: Answer): string[] {
 export function stopKey(a: Answer | null): string | undefined {
   const s = a?.chat?.last_stop;
   return s && a?.chat ? `${a.chat.id} ${s.ts} ${s.decision}` : undefined;
+}
+
+/** The token tip to highlight: the chat's newest one, when it was not seen before. */
+export function newTip(seen: readonly string[], a: Answer): string | null {
+  const t = a.chat?.last_tip?.trim();
+  if (!t) return null;
+  return seen.includes(tipKey(a) ?? "") ? null : t;
+}
+
+/** seen, with this answer's tip added; the newest 100 are kept. */
+export function rememberTip(seen: readonly string[], a: Answer): string[] {
+  const k = tipKey(a);
+  return k && !seen.includes(k) ? [...seen, k].slice(-100) : [...seen];
+}
+
+export function tipKey(a: Answer | null): string | undefined {
+  const t = a?.chat?.last_tip?.trim();
+  return t && a?.chat ? `${a.chat.id} ${t}` : undefined;
 }
 
 /** Told after the fact: the step already ran or did not; nothing is waiting for an answer here. An ask never claims

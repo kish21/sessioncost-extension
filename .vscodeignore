@@ -1,9 +1,10 @@
-# Everything not listed here ships. The .vsix holds only: dist/extension.js(.map), dist/npm (the npm wrapper that
+# Everything not listed here ships. The .vsix holds only: dist/extension.js, dist/npm (the npm wrapper that
 # installs SessionCost), media/icon.png, package.json, README, LICENSE, CHANGELOG.
 src/**
 tests/**
 scripts/**
 dist/tests/**
+dist/**/*.map
 node_modules/**
 # the public extension repo keeps the npm wrapper in npm/; the build copies it into dist/npm, which ships
 npm/**

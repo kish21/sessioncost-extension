@@ -9,14 +9,16 @@ import {
   lastPath,
   look,
   newStop,
+  newTip,
   notReady,
   parseAnswer,
   remember,
+  rememberTip,
   reportPath,
   stopMessage,
 } from "./core/answer";
 import { menu } from "./core/menu";
-import { fixArgs, launch, type Result, run } from "./core/run";
+import { fixArgs, launch, postInstallAction, type Result, refreshArgs, run, uninstallArgs } from "./core/run";
 import { newEnough } from "./core/stamp";
 
 const QUICK_MS = 120_000; // a status answer or a switch
@@ -31,6 +33,7 @@ let busy = false;
 let lastAsk = 0;
 let lastSig = "";
 let unseen = false;
+let unseenTip = false;
 let again = false; // a new chat showed up while SessionCost was busy answering: ask once more after
 const watchers: FSWatcher[] = [];
 let watched = "";
@@ -118,7 +121,12 @@ async function ensureInstalled(ask: boolean): Promise<boolean> {
       );
       return false;
     }
-    if (!older && process.env.SESSIONCOST_EDITOR_AUTO_INSTALL !== "1") {
+    const action = postInstallAction(older, process.env.SESSIONCOST_EDITOR_AUTO_INSTALL === "1");
+    if (action === "refresh") {
+      // Upgrade from an older version: refresh already-configured agent skills & hooks in the background
+      // so they match the new version without touching unconfigured agents or adding extra clicks.
+      void sc(refreshArgs(), LONG_MS).then(() => refresh(true));
+    } else if (action === "ask-setup") {
       const pick = await vscode.window.showInformationMessage(
         "SessionCost is installed. Set up your agents now? This adds /sessioncost and the guard's hooks to the agents found on this computer.",
         "Set up",
@@ -183,12 +191,22 @@ function signature(a: Answer | null): string {
 
 function paint(): void {
   if (!answer) return;
-  const l = look(answer, unseen);
+  const l = look(answer, unseen, unseenTip);
   bar.text = l.text;
   bar.tooltip = l.tooltip;
   bar.backgroundColor = l.warn ? new vscode.ThemeColor("statusBarItem.warningBackground") : undefined;
   bar.command = "sessioncost.menu";
   bar.show();
+}
+
+async function markTipSeen(): Promise<void> {
+  unseenTip = false;
+  if (answer?.chat?.last_tip?.trim()) {
+    await ctx.globalState.update(
+      "seenTips",
+      rememberTip(ctx.globalState.get<string[]>("seenTips") ?? [], answer),
+    );
+  }
 }
 
 /** The status bar while SessionCost cannot answer yet: installing, updating, or not there. */
@@ -227,9 +245,11 @@ async function refresh(force = false): Promise<void> {
       return;
     }
     const seen = ctx.globalState.get<string[]>("seenStops") ?? [];
+    const seenTips = ctx.globalState.get<string[]>("seenTips") ?? [];
     const stop = newStop(seen, next);
     const first = answer === null;
     answer = next;
+    unseenTip = Boolean(newTip(seenTips, next));
     lastSig = signature(answer);
     follow(answer);
     if (stop) {
@@ -298,12 +318,14 @@ async function thenRun(fn: () => Promise<unknown>): Promise<void> {
 
 const commands: Record<string, () => Promise<unknown> | unknown> = {
   "sessioncost.menu": async () => {
+    const hadUnseenTip = unseenTip;
     unseen = false;
+    await markTipSeen();
     paint();
     // one titled line above each group; the hint once, beside the name (as `detail` it showed a second time below)
     const picks: (vscode.QuickPickItem & { command?: string })[] = [];
     let group = "";
-    for (const i of menu(answer, vscode.workspace.isTrusted)) {
+    for (const i of menu(answer, vscode.workspace.isTrusted, hadUnseenTip)) {
       if (i.group !== group) picks.push({ label: i.group, kind: vscode.QuickPickItemKind.Separator });
       group = i.group;
       picks.push({ label: i.label, description: i.detail ?? "", command: i.command });
@@ -327,6 +349,8 @@ const commands: Record<string, () => Promise<unknown> | unknown> = {
     if (f && (await ensureInstalled(true))) await showRun(["last", "--project", f, "--brief", "--no-open"]);
   },
   "sessioncost.fix": async () => {
+    await markTipSeen();
+    paint();
     const f = needFolder();
     if (!f || !(await ensureInstalled(true))) return;
     if (!vscode.workspace.isTrusted) {
@@ -388,9 +412,43 @@ const commands: Record<string, () => Promise<unknown> | unknown> = {
     const f = needFolder();
     if (f && (await ensureInstalled(true))) await showRun(["list", "--project", f]);
   },
-  "sessioncost.setup": () => thenRun(() => showRun(["setup"], LONG_MS)),
-  "sessioncost.update": () => thenRun(() => showRun(["update"], LONG_MS)),
+  "sessioncost.setup": () =>
+    thenRun(async () => {
+      await showRun(["setup"], LONG_MS);
+      await refresh(true);
+    }),
+  "sessioncost.update": () =>
+    thenRun(async () => {
+      await showRun(["update"], LONG_MS);
+      await refresh(true);
+    }),
   "sessioncost.clean": () => thenRun(() => showRun(["clean"])),
+  "sessioncost.uninstall": async () => {
+    const w = wrapper.where(env());
+    if (!isInstalled() && !existsSync(w.stamp)) {
+      void vscode.window.showInformationMessage(
+        "SessionCost is not installed in this editor yet. You can uninstall the extension from the Extensions panel.",
+      );
+      return;
+    }
+    const pick = await vscode.window.showWarningMessage(
+      "Remove SessionCost's agent skills, guard hooks, and ~/.sessioncost folder? A backup is saved in your home folder first; nothing is deleted. Afterwards, uninstall the SessionCost extension from the Extensions panel.",
+      { modal: true },
+      "Uninstall",
+    );
+    if (pick !== "Uninstall") return;
+    const r = await showRun(uninstallArgs(), LONG_MS);
+    if (r.code === 0) {
+      answer = null;
+      unseen = false;
+      unseenTip = false;
+      unfollow();
+      waitBar();
+      void vscode.window.showInformationMessage(
+        "SessionCost skills, hooks, and data were removed (with a backup in your home folder). You can now uninstall the SessionCost extension from the Extensions panel.",
+      );
+    }
+  },
   "sessioncost.serve": async () => {
     const f = needFolder();
     if (!f || !(await ensureInstalled(true))) return;
@@ -432,7 +490,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<{ answ
       clearInterval(timer);
       timer = setInterval(() => vscode.window.state.focused && void refresh(), seconds() * 1000);
     }),
-    vscode.window.onDidChangeWindowState((s) => s.focused && void refresh()),
+    vscode.window.onDidChangeWindowState(
+      (s) => s.focused && void refresh(Boolean(answer?.setup && !answer.setup.ok)),
+    ),
     // several folders in one window: the bar shows the active file's folder, so a file in another folder asks at once
     vscode.window.onDidChangeActiveTextEditor(() => {
       const f = folder();

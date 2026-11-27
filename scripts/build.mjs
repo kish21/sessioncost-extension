@@ -8,7 +8,8 @@ const watch = process.argv.includes("--watch");
 const tests = process.argv.includes("--tests");
 const common = {
   bundle: true,
-  sourcemap: true,
+  minify: !watch && !tests,
+  sourcemap: watch || tests,
   logLevel: "info",
   target: "es2022",
   platform: "node",
