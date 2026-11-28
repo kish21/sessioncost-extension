@@ -432,12 +432,14 @@ const commands: Record<string, () => Promise<unknown> | unknown> = {
       return;
     }
     const pick = await vscode.window.showWarningMessage(
-      "Remove SessionCost's agent skills, guard hooks, and ~/.sessioncost folder? A backup is saved in your home folder first; nothing is deleted. Afterwards, uninstall the SessionCost extension from the Extensions panel.",
+      "Remove SessionCost's agent skills, guard hooks, and ~/.sessioncost folder? This deletes them cleanly, or choose 'Uninstall with backup' to save a copy in your home folder first. Afterwards, uninstall the SessionCost extension from the Extensions panel.",
       { modal: true },
       "Uninstall",
+      "Uninstall with backup",
     );
-    if (pick !== "Uninstall") return;
-    const r = await showRun(uninstallArgs(), LONG_MS);
+    if (pick !== "Uninstall" && pick !== "Uninstall with backup") return;
+    const withBackup = pick === "Uninstall with backup";
+    const r = await showRun(uninstallArgs(withBackup), LONG_MS);
     if (r.code === 0) {
       answer = null;
       unseen = false;
@@ -445,7 +447,9 @@ const commands: Record<string, () => Promise<unknown> | unknown> = {
       unfollow();
       waitBar();
       void vscode.window.showInformationMessage(
-        "SessionCost skills, hooks, and data were removed (with a backup in your home folder). You can now uninstall the SessionCost extension from the Extensions panel.",
+        withBackup
+          ? "SessionCost skills, hooks, and data were removed (a backup was saved in your home folder). You can now uninstall the SessionCost extension from the Extensions panel."
+          : "SessionCost skills, hooks, and data were removed cleanly. You can now uninstall the SessionCost extension from the Extensions panel.",
       );
     }
   },

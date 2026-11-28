@@ -41,9 +41,9 @@ export function refreshArgs(): string[] {
   return ["setup", "--refresh"];
 }
 
-/** Runs `sessioncost uninstall --yes` after the editor's own modal confirmation. */
-export function uninstallArgs(): string[] {
-  return ["uninstall", "--yes"];
+/** Runs `sessioncost uninstall --yes` (with optional `--backup`) after the editor's own modal confirmation. */
+export function uninstallArgs(backup = false): string[] {
+  return backup ? ["uninstall", "--yes", "--backup"] : ["uninstall", "--yes"];
 }
 
 export interface Result {
